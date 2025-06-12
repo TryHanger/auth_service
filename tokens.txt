@@ -1,0 +1,27 @@
+2. TokenRepository (интерфейс + реализация)
+Save(token string, userID uint, expiresAt time.Time)
+
+Delete(token string)
+
+DeleteAllByUserID(userID uint)
+
+Find(token string) (*RefreshToken, error)
+
+3. AuthService
+Методы:
+
+Login(email, password) → генерирует токены, сохраняет refresh.
+
+Refresh(refreshToken) → проверяет в БД, генерирует новый access.
+
+Logout(refreshToken) → удаляет refresh из БД.
+
+LogoutAll(userID) → удаляет все refresh по userID (если нужно).
+
+4. JWTAuthMiddleware
+Проверяет access token.
+
+При ошибке возвращает 401, а клиент сам решает делать ли refresh.
+
+❗️Middleware не делает refresh автоматически, это ответственность клиента (например, фронта).
+

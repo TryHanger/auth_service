@@ -2,10 +2,8 @@ package handlers
 
 import (
 	"auth/service"
-	"auth/utils"
 	"context"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/nyaruka/phonenumbers"
 	"net"
 	"net/http"
@@ -157,44 +155,4 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, tokens)
-}
-
-func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	var input struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	accessToken, err := h.service.RefreshAccessToken(c.Request.Context(), input.RefreshToken)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"access_token": accessToken})
-
-func (h *AuthHandler) Logout(c *gin.Context) {
-	userID, ok := c.Get("user_id")
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not logged in"})
-		return
-	}
-
-	var input struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	if err := h.service.Logout(c.Request.Context(), userID.(uint), input.RefreshToken); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }

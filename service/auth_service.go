@@ -67,7 +67,7 @@ func (s *AuthService) ConfirmEmail(token string) error {
 	return s.userRepo.UpdateUser(user)
 }
 
-func (s *AuthService) Login(ctx context.Context, password string) (map[string]string, error) {
+func (s *AuthService) Login(ctx context.Context, identifier, password string) (map[string]string, error) {
 	user, err := s.userRepo.UserExists(identifier, identifier)
 	if err != nil {
 		return nil, errors.New("user not found")
@@ -87,7 +87,9 @@ func (s *AuthService) Login(ctx context.Context, password string) (map[string]st
 		return nil, fmt.Errorf("cannot create refresh token: %w", err)
 	}
 
-	h.tokenRepo
+	if err := s.tokenRepo.SaveRefreshToken(ctx, refreshToken, user.ID, time.Now().Add(time.Hour*24*30)); err != nil {
+		return nil, errors.New("failed to save refresh token")
+	}
 
 	return map[string]string{
 		"access_token":  accessToken,
@@ -95,41 +97,19 @@ func (s *AuthService) Login(ctx context.Context, password string) (map[string]st
 	}, nil
 }
 
-func (s *AuthService) Logout(ctx context.Context, userID uint, accessToken string) error {
-	if err := s.tokenRepo.InvalidateAccessToken(ctx, accessToken); err != nil {
-		return errors.New("failed to invalidate access token")
+func (s *AuthService) Logout(ctx context.Context, userID uint, accessToken, refreshToken string) error {
+	storedToken, err := s.tokenRepo.FindRefreshToken(ctx, refreshToken)
+	if err != nil {
+		return errors.New("invalid or expired refresh token")
 	}
 
-	if err := s.tokenRepo.DeleteRefreshToken(ctx, userID); err != nil {
-		return errors.New("failed to delete refresh token")
+	if storedToken.UserID != userID {
+		return errors.New("token doesnt belong to user")
 	}
 
-	if err := s.tokenRepo.ClearUserSessions(ctx, userID); err != nil {
-		return errors.New("failed to clear user sessions")
+	if err := s.tokenRepo.DeleteRefreshToken(ctx, refreshToken); err != nil {
+		return fmt.Errorf("failed to delete refresh token: %w", err)
 	}
 
 	return nil
-}
-
-func (s *AuthService) CreateRefreshToken(ctx context.Context, userID uint, token string, expiresAt time.Time) error {
-	return s.tokenRepo.SaveRefreshToken(ctx, token, userID, expiresAt)
-}
-
-func (s *AuthService) ValidateRefreshToken(ctx context.Context, token string) (*model.RefreshToken, error) {
-	refreshToken, err := s.tokenRepo.FindRefreshToken(ctx, token)
-	if err != nil {
-		return nil, errors.New("invalid or expired refresh token")
-	}
-	if refreshToken.ExpiresAt.Before(time.Now()) {
-		return nil, errors.New("invalid or expired refresh token")
-	}
-	return refreshToken, nil
-}
-
-func (s *AuthService) RevokeRefreshToken(ctx context.Context, token string) error {
-	return s.tokenRepo.DeleteRefreshToken(ctx, token)
-}
-
-func (s *AuthService) RevokeAllRefreshTokensForUser(ctx context.Context, userID uint) error {
-	return s.tokenRepo.DeleteAllRefreshTokensForUser(ctx, userID)
 }
