@@ -7,6 +7,7 @@ import (
 	"auth/model"
 	"auth/repository"
 	"auth/service"
+
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -23,7 +24,7 @@ func main() {
 
 	tokenRepo := repository.NewTokenRepository(database.DB, redisClient)
 	userRepo := repository.NewUserRepository(database.DB)
-	authService := service.NewAuthService(userRepo, tokenRepo)
+	authService := service.NewAuthService(userRepo, tokenRepo, redisClient) // Передаем redisClient
 	authHandler := handlers.NewAuthHandler(authService)
 
 	r := gin.Default()
@@ -31,14 +32,13 @@ func main() {
 	r.POST("/register", authHandler.Register)
 	r.GET("/confirm", authHandler.ConfirmEmail)
 	r.POST("/login", authHandler.Login)
-
+	r.POST("/refresh", authHandler.RefreshToken) // Раскомментируем маршрут
 	r.GET("/profile", middleware.JWTAuthMiddleware(), func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uint)
 		c.JSON(200, gin.H{
 			"user_id": userID,
 		})
 	})
-	//r.POST("/refresh", authHandler.RefreshToken)
 
 	r.Run("localhost:8080")
 }

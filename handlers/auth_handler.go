@@ -3,13 +3,14 @@ package handlers
 import (
 	"auth/service"
 	"context"
-	"github.com/gin-gonic/gin"
-	"github.com/nyaruka/phonenumbers"
 	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/nyaruka/phonenumbers"
 )
 
 type AuthHandler struct {
@@ -127,7 +128,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 func (h *AuthHandler) ConfirmEmail(c *gin.Context) {
 	token := c.Query("token")
-	if token == "" {
+	email := c.Query("email")
+	if token == "" || email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
 		return
 	}
@@ -139,6 +141,24 @@ func (h *AuthHandler) ConfirmEmail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "email confirmed"})
+}
+
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	var input struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	accessToken, err := h.service.RefreshAccessToken(c.Request.Context(), input.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"access_token": accessToken})
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
