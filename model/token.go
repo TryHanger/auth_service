@@ -11,3 +11,9 @@ type RefreshToken struct {
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }
+
+type TokenMetadata struct {
+	UserID    uint
+	ExpiresAt time.Time
+	JTI       string
+}

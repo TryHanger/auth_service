@@ -9,18 +9,19 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"strconv"
 	"time"
 )
 
 type AuthService struct {
 	userRepo  *repository.UserRepository
-	tokenRepo *repository.TokenRepository
+	tokenRepo repository.TokenRepository
 }
 
-func NewAuthService(userRepo *repository.UserRepository, tokenRepo *repository.TokenRepository) *AuthService {
+func NewAuthService(userRepo *repository.UserRepository, redisTokenRepo repository.TokenRepository) *AuthService {
 	return &AuthService{
 		userRepo:  userRepo,
-		tokenRepo: tokenRepo,
+		tokenRepo: redisTokenRepo,
 	}
 }
 
@@ -72,23 +73,30 @@ func (s *AuthService) Login(ctx context.Context, identifier, password string) (m
 	if err != nil {
 		return nil, errors.New("user not found")
 	}
-
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PassHash), []byte(password)); err != nil {
 		return nil, errors.New("invalid password")
 	}
 
-	accessToken, err := utils.GenerateAccessToken(user.ID)
+	userID := strconv.FormatUint(uint64(user.ID), 10)
+
+	accessToken, jti, err := utils.GenerateAccessToken(userID)
 	if err != nil {
-		return nil, fmt.Errorf("cannot create access token: %w", err)
+		return nil, err
 	}
 
-	refreshToken, err := utils.GenerateRefreshToken(user.ID)
+	refreshToken, err := utils.GenerateRefreshToken(userID)
 	if err != nil {
-		return nil, fmt.Errorf("cannot create refresh token: %w", err)
+		return nil, err
 	}
 
-	if err := s.tokenRepo.SaveRefreshToken(ctx, refreshToken, user.ID, time.Now().Add(time.Hour*24*30)); err != nil {
-		return nil, errors.New("failed to save refresh token")
+	metadata := model.TokenMetadata{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		JTI:       jti,
+	}
+	err = s.tokenRepo.StoreRefreshToken(ctx, refreshToken, metadata)
+	if err != nil {
+		return nil, err
 	}
 
 	return map[string]string{
@@ -97,19 +105,54 @@ func (s *AuthService) Login(ctx context.Context, identifier, password string) (m
 	}, nil
 }
 
-func (s *AuthService) Logout(ctx context.Context, userID uint, accessToken, refreshToken string) error {
-	storedToken, err := s.tokenRepo.FindRefreshToken(ctx, refreshToken)
-	if err != nil {
-		return errors.New("invalid or expired refresh token")
+func (s *AuthService) Logout(ctx context.Context, tokenString, jti string, exp time.Time) error {
+	// Add to blacklist
+	if err := s.tokenRepo.BlacklistAccessToken(ctx, jti, time.Until(exp)); err != nil {
+		return err
 	}
 
-	if storedToken.UserID != userID {
-		return errors.New("token doesnt belong to user")
-	}
-
-	if err := s.tokenRepo.DeleteRefreshToken(ctx, refreshToken); err != nil {
-		return fmt.Errorf("failed to delete refresh token: %w", err)
+	// Delete refresh token
+	if err := s.tokenRepo.DeleteRefreshToken(ctx, tokenString); err != nil {
+		return err
 	}
 
 	return nil
+}
+
+func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (map[string]string, error) {
+	if _, err := utils.ValidateJWT(refreshToken); err != nil {
+		return nil, errors.New("invalid refresh token")
+	}
+
+	storedMeta, err := s.tokenRepo.FetchRefreshToken(ctx, refreshToken)
+	if err != nil {
+		return nil, errors.New("refresh token not found")
+	}
+
+	if err := s.tokenRepo.BlacklistAccessToken(ctx, storedMeta.JTI, 15*time.Minute); err != nil {
+		return nil, err
+	}
+
+	if err := s.tokenRepo.DeleteRefreshToken(ctx, refreshToken); err != nil {
+		return nil, err
+	}
+
+	accessToken, jti, err := utils.GenerateAccessToken(strconv.FormatUint(uint64(storedMeta.UserID), 10))
+	if err != nil {
+		return nil, err
+	}
+
+	newMeta := model.TokenMetadata{
+		UserID:    storedMeta.UserID,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		JTI:       jti,
+	}
+
+	if err := s.tokenRepo.StoreRefreshToken(ctx, refreshToken, newMeta); err != nil {
+		return nil, err
+	}
+
+	return map[string]string{
+		"access_token": accessToken,
+	}, nil
 }

@@ -1,43 +1,55 @@
 package middleware
 
 import (
+	"auth/repository"
 	"auth/utils"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"strings"
 )
 
-func JWTAuthMiddleware() gin.HandlerFunc {
+type AuthMiddleware struct {
+	TokenRepo repository.TokenRepository
+}
+
+func NewAuthMiddleware(tokenRepo repository.TokenRepository) *AuthMiddleware {
+	return &AuthMiddleware{
+		TokenRepo: tokenRepo,
+	}
+}
+
+func (m *AuthMiddleware) JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or missing token"})
+		if authHeader == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "No Authorization header found"})
 			return
 		}
 
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-
-		token, err := utils.ValidateJWT(tokenStr)
-		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == authHeader {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			return
 		}
 
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid claims"})
+		claims, err := utils.ValidateJWT(tokenString)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			return
 		}
 
-		userIDFloat, ok := claims["user_id"].(float64)
-		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid user_id in token"})
+		jti := claims.ID
+		isBlacklisted, err := m.TokenRepo.IsBlacklisted(c.Request.Context(), jti)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if isBlacklisted {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token is blacklisted"})
 			return
 		}
 
-		userID := uint(userIDFloat)
-		c.Set("user_id", userID)
+		c.Set("user_id", claims.Subject)
 		c.Next()
 	}
 }

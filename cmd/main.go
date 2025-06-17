@@ -21,10 +21,11 @@ func main() {
 	database.Connect()
 	database.DB.AutoMigrate(&model.User{}, &model.RefreshToken{})
 
-	tokenRepo := repository.NewTokenRepository(database.DB, redisClient)
+	tokenRepo := repository.NewRedisTokenRepository(redisClient)
 	userRepo := repository.NewUserRepository(database.DB)
 	authService := service.NewAuthService(userRepo, tokenRepo)
 	authHandler := handlers.NewAuthHandler(authService)
+	authMiddleware := middleware.NewAuthMiddleware(tokenRepo)
 
 	r := gin.Default()
 
@@ -32,13 +33,20 @@ func main() {
 	r.GET("/confirm", authHandler.ConfirmEmail)
 	r.POST("/login", authHandler.Login)
 
-	r.GET("/profile", middleware.JWTAuthMiddleware(), func(c *gin.Context) {
-		userID := c.MustGet("user_id").(uint)
-		c.JSON(200, gin.H{
-			"user_id": userID,
+	auth := r.Group("/auth")
+	auth.Use(authMiddleware.JWTAuthMiddleware())
+	{
+		auth.GET("/profile", func(c *gin.Context) {
+			userID := c.MustGet("user_id").(uint)
+			c.JSON(200, gin.H{
+				"user_id": userID,
+			})
 		})
-	})
-	//r.POST("/refresh", authHandler.RefreshToken)
+		auth.POST("/logout", authHandler.Logout)
+	}
+
+	//r.POST("/logout", authHandler.Logout)
+	r.POST("/refresh", authHandler.RefreshToken)
 
 	r.Run("localhost:8080")
 }

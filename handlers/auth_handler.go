@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"auth/service"
+	"auth/utils"
 	"context"
 	"github.com/gin-gonic/gin"
 	"github.com/nyaruka/phonenumbers"
@@ -30,6 +31,14 @@ type RegisterInput struct {
 type LoginInput struct {
 	Identifier string `json:"identifier" binding:"required"`
 	Password   string `json:"password" binding:"required,min=6"`
+}
+
+type RefreshInput struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 func isPhone(s string) bool {
@@ -151,6 +160,54 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	tokens, err := h.service.Login(c.Request.Context(), input.Identifier, input.Password)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, tokens)
+}
+
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req LogoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token required"})
+		return
+	}
+
+	// Получаем access_token из заголовка
+	tokenString := utils.ExtractToken(c)
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "no token found"})
+		return
+	}
+
+	claims, err := utils.ValidateJWT(tokenString)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		return
+	}
+
+	jti := claims.ID
+	exp := time.Unix(claims.ExpiresAt.Unix(), 0)
+
+	err = h.service.Logout(c.Request.Context(), req.RefreshToken, jti, exp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "logout failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+}
+
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	var input RefreshInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+
+	tokens, err := h.service.RefreshTokens(c.Request.Context(), input.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
