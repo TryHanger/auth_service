@@ -43,8 +43,10 @@ func main() {
 			})
 		})
 		auth.GET("/sessions", authHandler.GetSessions)
-		auth.DELETE("/sessions/:jti", authHandler.LogoutSession)
+		auth.DELETE("/logout/:jti", authHandler.LogoutSession)
 		auth.DELETE("/sessions", authHandler.LogoutAll)
+		auth.POST("/logout/others", authHandler.LogoutOtherSessions)
+		auth.GET("/sessions/:jti", authHandler.GetSession)
 	}
 
 	//r.POST("/logout", authHandler.Logout)

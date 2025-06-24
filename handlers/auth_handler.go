@@ -260,3 +260,31 @@ func (h *AuthHandler) LogoutAll(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "all sessions logged out"})
 }
+
+func (h *AuthHandler) LogoutOtherSessions(c *gin.Context) {
+	userIDStr := c.MustGet("user_id").(string)
+	jti := c.MustGet("jti").(string)
+
+	err := h.service.LogoutOtherSessions(c.Request.Context(), userIDStr, jti)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to logout from other sessions"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "other sessions logged out"})
+}
+
+func (h *AuthHandler) GetSession(c *gin.Context) {
+	userIDStr := c.MustGet("user_id").(string)
+	userIDUint64, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID"})
+	}
+	jti := c.Param("jti")
+	userID := uint(userIDUint64)
+	session, err := h.service.GetSession(c.Request.Context(), userID, jti)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	c.JSON(http.StatusOK, session)
+}
