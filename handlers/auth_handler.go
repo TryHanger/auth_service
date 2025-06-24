@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -157,7 +158,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	tokens, err := h.service.Login(c.Request.Context(), input.Identifier, input.Password)
+	ip := c.ClientIP()
+	ua := c.Request.UserAgent()
+
+	tokens, err := h.service.Login(c.Request.Context(), input.Identifier, input.Password, ip, ua)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -212,4 +216,47 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, tokens)
+}
+
+func (h *AuthHandler) GetSessions(c *gin.Context) {
+	userID := c.MustGet("user_id").(string)
+	sessions, err := h.service.GetUserSessions(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, sessions)
+}
+
+func (h *AuthHandler) LogoutSession(c *gin.Context) {
+	userIDStr := c.MustGet("user_id").(string)
+	userIDUint64, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID"})
+		return
+	}
+	userID := uint(userIDUint64)
+	jti := c.Param("jti")
+
+	err = h.service.LogoutSession(c.Request.Context(), userID, jti)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to logout from session"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "session logged out"})
+}
+
+func (h *AuthHandler) LogoutAll(c *gin.Context) {
+	userIDStr := c.MustGet("user_id").(string)
+	userIDUint64, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID"})
+		return
+	}
+	userID := uint(userIDUint64)
+	if err := h.service.LogoutAllSession(c.Request.Context(), userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to logout from all sessions"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "all sessions logged out"})
 }

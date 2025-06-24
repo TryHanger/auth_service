@@ -5,6 +5,7 @@ import (
 	"auth/repository"
 	"auth/utils"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -68,7 +69,7 @@ func (s *AuthService) ConfirmEmail(token string) error {
 	return s.userRepo.UpdateUser(user)
 }
 
-func (s *AuthService) Login(ctx context.Context, identifier, password string) (map[string]string, error) {
+func (s *AuthService) Login(ctx context.Context, identifier, password, ip, userAgent string) (map[string]string, error) {
 	user, err := s.userRepo.UserExists(identifier, identifier)
 	if err != nil {
 		return nil, errors.New("user not found")
@@ -95,6 +96,20 @@ func (s *AuthService) Login(ctx context.Context, identifier, password string) (m
 		JTI:       jti,
 	}
 	err = s.tokenRepo.StoreRefreshToken(ctx, refreshToken, metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	session := model.Session{
+		UserID:       user.ID,
+		IPAddress:    ip,
+		UserAgent:    userAgent,
+		JTI:          jti,
+		RefreshToken: refreshToken,
+		ExpiresAt:    time.Now().Add(30 * 24 * time.Hour),
+	}
+
+	err = s.tokenRepo.StoreSession(ctx, session)
 	if err != nil {
 		return nil, err
 	}
@@ -155,4 +170,42 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (m
 	return map[string]string{
 		"access_token": accessToken,
 	}, nil
+}
+
+func (s *AuthService) GetUserSessions(ctx context.Context, userID string) ([]model.Session, error) {
+	return s.tokenRepo.GetSessionsByUser(ctx, userID)
+}
+
+func (s *AuthService) LogoutSession(ctx context.Context, userID uint, jti string) error {
+	sessionKey := fmt.Sprintf("session:%d:%s", userID, jti)
+	val, err := s.tokenRepo.GetRawSession(ctx, sessionKey)
+	if err != nil {
+		return err
+	}
+
+	var session model.Session
+	if err := json.Unmarshal([]byte(val), &session); err != nil {
+		return err
+	}
+
+	if err := s.tokenRepo.DeleteRefreshToken(ctx, session.RefreshToken); err != nil {
+		return err
+	}
+	return s.tokenRepo.DeleteSession(ctx, sessionKey)
+}
+
+func (s *AuthService) LogoutAllSession(ctx context.Context, userID uint) error {
+	sessions, err := s.tokenRepo.GetSessionsByUser(ctx, strconv.FormatUint(uint64(userID), 10))
+	if err != nil {
+		return err
+	}
+
+	for _, session := range sessions {
+		if err := s.tokenRepo.DeleteRefreshToken(ctx, session.RefreshToken); err != nil {
+			continue
+		}
+		key := fmt.Sprintf("session:%d:%s", userID, session.JTI)
+		_ = s.tokenRepo.DeleteSession(ctx, key)
+	}
+	return nil
 }

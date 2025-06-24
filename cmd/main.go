@@ -37,12 +37,14 @@ func main() {
 	auth.Use(authMiddleware.JWTAuthMiddleware())
 	{
 		auth.GET("/profile", func(c *gin.Context) {
-			userID := c.MustGet("user_id").(uint)
+			userID := c.MustGet("user_id").(string)
 			c.JSON(200, gin.H{
 				"user_id": userID,
 			})
 		})
-		auth.POST("/logout", authHandler.Logout)
+		auth.GET("/sessions", authHandler.GetSessions)
+		auth.DELETE("/sessions/:jti", authHandler.LogoutSession)
+		auth.DELETE("/sessions", authHandler.LogoutAll)
 	}
 
 	//r.POST("/logout", authHandler.Logout)
