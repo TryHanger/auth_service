@@ -161,6 +161,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	ip := c.ClientIP()
 	ua := c.Request.UserAgent()
 
+	limited, err := h.service.IsLoginRateLimited(c.Request.Context(), ip, input.Identifier)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "rate limit check failed"})
+		return
+	}
+	if limited {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many login attempts. Try again later."})
+		return
+	}
+
 	tokens, err := h.service.Login(c.Request.Context(), input.Identifier, input.Password, ip, ua)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

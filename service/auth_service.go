@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 	"strconv"
 	"time"
 )
@@ -27,8 +28,11 @@ func NewAuthService(userRepo *repository.UserRepository, redisTokenRepo reposito
 }
 
 func (s *AuthService) Register(email, phone, password string) error {
-	_, err := s.userRepo.UserExists(email, phone)
-	if err == nil {
+	User, err := s.userRepo.UserExists(email, phone)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if User != nil {
 		return errors.New("user already exists")
 	}
 
@@ -235,4 +239,17 @@ func (s *AuthService) LogoutOtherSessions(ctx context.Context, userID, currentJT
 
 func (s *AuthService) GetSession(ctx context.Context, userID uint, jti string) (*model.Session, error) {
 	return s.tokenRepo.FetchSession(ctx, userID, jti)
+}
+
+func (s *AuthService) IsLoginRateLimited(ctx context.Context, ip, identifier string) (bool, error) {
+	key := fmt.Sprintf("login_attempts:%s:%s", ip, identifier)
+	count, err := s.tokenRepo.IncrWithExpire(ctx, key, 5*time.Minute)
+	if err != nil {
+		return false, err
+	}
+
+	if count > 5 {
+		return true, nil
+	}
+	return false, nil
 }

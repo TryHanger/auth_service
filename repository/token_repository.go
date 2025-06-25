@@ -26,6 +26,7 @@ type TokenRepository interface {
 	DeleteSession(ctx context.Context, key string) error
 	CleanupExpiredSessions(ctx context.Context, userID uint) error
 	FetchSession(ctx context.Context, userID uint, jti string) (*model.Session, error)
+	IncrWithExpire(ctx context.Context, key string, ttl time.Duration) (int64, error)
 }
 
 type RedisTokenRepository struct {
@@ -177,4 +178,18 @@ func (r *RedisTokenRepository) FetchSession(ctx context.Context, userID uint, jt
 		return nil, err
 	}
 	return &session, nil
+}
+
+func (r *RedisTokenRepository) IncrWithExpire(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	pipe := r.redis.TxPipeline()
+
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, ttl)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return incr.Val(), nil
 }
