@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 	"strconv"
 	"time"
 )
@@ -27,8 +28,11 @@ func NewAuthService(userRepo *repository.UserRepository, redisTokenRepo reposito
 }
 
 func (s *AuthService) Register(email, phone, password string) error {
-	_, err := s.userRepo.UserExists(email, phone)
-	if err == nil {
+	User, err := s.userRepo.UserExists(email, phone)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if User != nil {
 		return errors.New("user already exists")
 	}
 
@@ -107,12 +111,15 @@ func (s *AuthService) Login(ctx context.Context, identifier, password, ip, userA
 		JTI:          jti,
 		RefreshToken: refreshToken,
 		ExpiresAt:    time.Now().Add(30 * 24 * time.Hour),
+		CreatedAt:    time.Now(),
 	}
 
 	err = s.tokenRepo.StoreSession(ctx, session)
 	if err != nil {
 		return nil, err
 	}
+
+	_ = s.tokenRepo.CleanupExpiredSessions(ctx, user.ID)
 
 	return map[string]string{
 		"access_token":  accessToken,
@@ -208,4 +215,41 @@ func (s *AuthService) LogoutAllSession(ctx context.Context, userID uint) error {
 		_ = s.tokenRepo.DeleteSession(ctx, key)
 	}
 	return nil
+}
+
+func (s *AuthService) LogoutOtherSessions(ctx context.Context, userID, currentJTI string) error {
+	sessions, err := s.tokenRepo.GetSessionsByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	for _, session := range sessions {
+		if session.JTI == currentJTI {
+			continue
+		}
+
+		_ = s.tokenRepo.BlacklistAccessToken(ctx, session.JTI, time.Until(session.ExpiresAt))
+		_ = s.tokenRepo.DeleteRefreshToken(ctx, session.RefreshToken)
+
+		key := fmt.Sprintf("session:%s:%s", userID, session.JTI)
+		_ = s.tokenRepo.DeleteSession(ctx, key)
+	}
+	return nil
+}
+
+func (s *AuthService) GetSession(ctx context.Context, userID uint, jti string) (*model.Session, error) {
+	return s.tokenRepo.FetchSession(ctx, userID, jti)
+}
+
+func (s *AuthService) IsLoginRateLimited(ctx context.Context, ip, identifier string) (bool, error) {
+	key := fmt.Sprintf("login_attempts:%s:%s", ip, identifier)
+	count, err := s.tokenRepo.IncrWithExpire(ctx, key, 5*time.Minute)
+	if err != nil {
+		return false, err
+	}
+
+	if count > 5 {
+		return true, nil
+	}
+	return false, nil
 }

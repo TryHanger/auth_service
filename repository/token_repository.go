@@ -24,6 +24,9 @@ type TokenRepository interface {
 	GetSessionsByUser(ctx context.Context, userID string) ([]model.Session, error)
 	GetRawSession(ctx context.Context, key string) (string, error)
 	DeleteSession(ctx context.Context, key string) error
+	CleanupExpiredSessions(ctx context.Context, userID uint) error
+	FetchSession(ctx context.Context, userID uint, jti string) (*model.Session, error)
+	IncrWithExpire(ctx context.Context, key string, ttl time.Duration) (int64, error)
 }
 
 type RedisTokenRepository struct {
@@ -119,6 +122,12 @@ func (r *RedisTokenRepository) GetSessionsByUser(ctx context.Context, userID str
 		if err := json.Unmarshal([]byte(val), &session); err != nil {
 			continue
 		}
+
+		if time.Now().After(session.ExpiresAt) {
+			_ = r.redis.Del(ctx, key).Err()
+			continue
+		}
+
 		sessions = append(sessions, session)
 	}
 	return sessions, nil
@@ -130,4 +139,57 @@ func (r *RedisTokenRepository) GetRawSession(ctx context.Context, key string) (s
 
 func (r *RedisTokenRepository) DeleteSession(ctx context.Context, key string) error {
 	return r.redis.Del(ctx, key).Err()
+}
+
+func (r *RedisTokenRepository) CleanupExpiredSessions(ctx context.Context, userID uint) error {
+	pattern := fmt.Sprintf("session:%d:*", userID)
+	keys, err := r.redis.Keys(ctx, pattern).Result()
+	if err != nil {
+		return err
+	}
+
+	for _, key := range keys {
+		val, err := r.redis.Get(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+		var session model.Session
+		if err := json.Unmarshal([]byte(val), &session); err != nil {
+			continue
+		}
+		if time.Now().After(session.ExpiresAt) {
+			_ = r.redis.Del(ctx, key).Err()
+		}
+	}
+	return nil
+}
+
+func (r *RedisTokenRepository) FetchSession(ctx context.Context, userID uint, jti string) (*model.Session, error) {
+	key := fmt.Sprintf("session:%d:%s", userID, jti)
+	val, err := r.redis.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, errors.New("session not found")
+	} else if err != nil {
+		return nil, err
+	}
+
+	var session model.Session
+	if err := json.Unmarshal([]byte(val), &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (r *RedisTokenRepository) IncrWithExpire(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	pipe := r.redis.TxPipeline()
+
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, ttl)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return incr.Val(), nil
 }

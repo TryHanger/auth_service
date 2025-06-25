@@ -2,6 +2,7 @@ package repository
 
 import (
 	"auth/model"
+	"errors"
 	"gorm.io/gorm"
 )
 
@@ -30,6 +31,9 @@ func (r *UserRepository) GetByEmail(email string) (*model.User, error) {
 func (r *UserRepository) UserExists(email, phone string) (*model.User, error) {
 	var user model.User
 	err := r.DB.Where("email = ? OR phone = ?", email, phone).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

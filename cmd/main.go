@@ -7,6 +7,7 @@ import (
 	"auth/model"
 	"auth/repository"
 	"auth/service"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -28,6 +29,13 @@ func main() {
 	authMiddleware := middleware.NewAuthMiddleware(tokenRepo)
 
 	r := gin.Default()
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+		AllowCredentials: true, //true если cookie
+		MaxAge:           12 * 3600,
+	}))
 
 	r.POST("/register", authHandler.Register)
 	r.GET("/confirm", authHandler.ConfirmEmail)
@@ -43,8 +51,10 @@ func main() {
 			})
 		})
 		auth.GET("/sessions", authHandler.GetSessions)
-		auth.DELETE("/sessions/:jti", authHandler.LogoutSession)
+		auth.DELETE("/logout/:jti", authHandler.LogoutSession)
 		auth.DELETE("/sessions", authHandler.LogoutAll)
+		auth.POST("/logout/others", authHandler.LogoutOtherSessions)
+		auth.GET("/sessions/:jti", authHandler.GetSession)
 	}
 
 	//r.POST("/logout", authHandler.Logout)

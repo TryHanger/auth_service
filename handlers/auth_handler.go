@@ -161,6 +161,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	ip := c.ClientIP()
 	ua := c.Request.UserAgent()
 
+	limited, err := h.service.IsLoginRateLimited(c.Request.Context(), ip, input.Identifier)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "rate limit check failed"})
+		return
+	}
+	if limited {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many login attempts. Try again later."})
+		return
+	}
+
 	tokens, err := h.service.Login(c.Request.Context(), input.Identifier, input.Password, ip, ua)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -259,4 +269,32 @@ func (h *AuthHandler) LogoutAll(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "all sessions logged out"})
+}
+
+func (h *AuthHandler) LogoutOtherSessions(c *gin.Context) {
+	userIDStr := c.MustGet("user_id").(string)
+	jti := c.MustGet("jti").(string)
+
+	err := h.service.LogoutOtherSessions(c.Request.Context(), userIDStr, jti)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to logout from other sessions"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "other sessions logged out"})
+}
+
+func (h *AuthHandler) GetSession(c *gin.Context) {
+	userIDStr := c.MustGet("user_id").(string)
+	userIDUint64, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID"})
+	}
+	jti := c.Param("jti")
+	userID := uint(userIDUint64)
+	session, err := h.service.GetSession(c.Request.Context(), userID, jti)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	c.JSON(http.StatusOK, session)
 }

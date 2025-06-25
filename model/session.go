@@ -9,4 +9,5 @@ type Session struct {
 	JTI          string    `json:"jti"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
+	CreatedAt    time.Time `json:"created_at"`
 }
