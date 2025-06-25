@@ -11,5 +11,4 @@ type User struct {
 	PassHash     string
 	IsConfirmed  bool
 	ConfirmToken string
-	RefreshToken string
 }

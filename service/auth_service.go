@@ -1,6 +1,7 @@
 package service
 
 import (
+	"auth/mail"
 	"auth/model"
 	"auth/repository"
 	"auth/utils"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"strconv"
@@ -16,14 +18,16 @@ import (
 )
 
 type AuthService struct {
-	userRepo  *repository.UserRepository
-	tokenRepo repository.TokenRepository
+	userRepo    *repository.UserRepository
+	tokenRepo   repository.TokenRepository
+	redisClient *redis.Client
 }
 
-func NewAuthService(userRepo *repository.UserRepository, redisTokenRepo repository.TokenRepository) *AuthService {
+func NewAuthService(userRepo *repository.UserRepository, redisTokenRepo repository.TokenRepository, redisClient *redis.Client) *AuthService {
 	return &AuthService{
-		userRepo:  userRepo,
-		tokenRepo: redisTokenRepo,
+		userRepo:    userRepo,
+		tokenRepo:   redisTokenRepo,
+		redisClient: redisClient,
 	}
 }
 
@@ -48,15 +52,21 @@ func (s *AuthService) Register(email, phone, password string) error {
 		ConfirmToken: token,
 	}
 
+	if email == "" && phone == "" {
+		return errors.New("either email or phone must be provided")
+	}
+
 	if phone != "" {
 		user.Phone = phone
 	}
 
 	if email != "" {
 		user.Email = email
-	}
 
-	fmt.Printf("Confirm your email: http://localhost:8080/confirm?token=%s\n", token)
+		if err := mail.SendConfirmationEmail(email, token); err != nil {
+			return fmt.Errorf("failed to send confirmation email: %w", err)
+		}
+	}
 
 	return s.userRepo.Create(user)
 }
@@ -67,8 +77,12 @@ func (s *AuthService) ConfirmEmail(token string) error {
 		return errors.New("invalid or expired token")
 	}
 
+	if user.IsConfirmed {
+		return errors.New("email already confirmed")
+	}
+
 	user.IsConfirmed = true
-	user.ConfirmToken = ""
+	user.ConfirmToken = "" // Очистить, чтобы не использовать повторно
 
 	return s.userRepo.UpdateUser(user)
 }
