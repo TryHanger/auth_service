@@ -9,8 +9,17 @@ import (
 	"auth/service"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
+	"log"
 )
+
+func init() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+}
 
 func main() {
 	redisClient := redis.NewClient(&redis.Options{
@@ -24,7 +33,7 @@ func main() {
 
 	tokenRepo := repository.NewRedisTokenRepository(redisClient)
 	userRepo := repository.NewUserRepository(database.DB)
-	authService := service.NewAuthService(userRepo, tokenRepo)
+	authService := service.NewAuthService(userRepo, tokenRepo, redisClient)
 	authHandler := handlers.NewAuthHandler(authService)
 	authMiddleware := middleware.NewAuthMiddleware(tokenRepo)
 

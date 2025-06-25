@@ -111,6 +111,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	email := ""
 	phone := ""
 
+	if input.Identifier == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "identifier is required"})
+		return
+	}
+
 	switch {
 	case isEmail(input.Identifier):
 		email = input.Identifier
@@ -142,13 +147,12 @@ func (h *AuthHandler) ConfirmEmail(c *gin.Context) {
 		return
 	}
 
-	err := h.service.ConfirmEmail(token)
-	if err != nil {
+	if err := h.service.ConfirmEmail(token); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "email confirmed"})
+	c.JSON(http.StatusOK, gin.H{"message": "Email confirmed successfully"})
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
